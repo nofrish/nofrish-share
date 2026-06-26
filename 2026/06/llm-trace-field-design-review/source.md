@@ -270,7 +270,7 @@ Session
 
 - `lifecycle_id`：看不出它到底是哪种 lifecycle。
 - `trace_id`：看不出它对应 session、message，还是某次调用链。
-- `span_id`：对当前后端来说不自然。真正需要的是 call。
+- `span_id`：看不出它对应哪一次具体业务动作或模型请求。
 - `parent_span_id`：暗示有调用树，但当前实现并没有真实调用树。
 
 这些名字不是中性的。它们会误导接入方以为系统里存在更多层级。
