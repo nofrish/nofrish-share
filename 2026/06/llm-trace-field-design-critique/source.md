@@ -4,7 +4,9 @@ date: 2026-06-26
 slug: llm-trace-field-design-critique
 ---
 
-> 把通用模型照搬进来很容易；难的是承认自己的场景更简单，然后设计一套看起来不够“标准”、但刚好正确的模型。工程设计应该选择后者。
+> It is easy to look standard.
+> It is hard to be right.
+> We should choose the hard thing.
 
 ## 背景
 
