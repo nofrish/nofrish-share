@@ -33,13 +33,13 @@ Session：一个用户会话
 Session -> Message -> Call
 ```
 
-最多在下一层扩展一个可选的：
+如果未来某一天，一个 `Message` 内部的 `Call` 也需要表达层级关系，再在 `Call` 上增加一个可选的父调用字段：
 
 ```text
 parent_call_id
 ```
 
-用来表达调用树。
+用来表达“某个 call 是由另一个 call 触发的”。它不是新的主层级，也不是第一版必须有的字段。
 
 但当前系统没有守住这个简单模型，而是引入了 `session_key`、`lifecycle_id`、`trace_id`、`span_id`、`parent_span_id` 等一堆字段。问题不只是字段多，而是抽象层级错了。
 
@@ -63,7 +63,7 @@ parent_call_id
 理想字段：
 
 ```text
-session_key
+session_id
 ```
 
 这个字段应该只表达会话身份，不应该混入入口、aApp、feature 或 plugin 信息。
@@ -363,12 +363,12 @@ parent_span_id
 理想字段体系应该是：
 
 ```text
-session_key
+session_id
 message_id
 call_id
 ```
 
-如果下一步确实需要调用树，再增加：
+如果未来一个 `Message` 内部的 `Call` 需要分层，再增加：
 
 ```text
 parent_call_id
@@ -377,10 +377,10 @@ parent_call_id
 也就是说：
 
 ```text
-session_key：标识同一个会话
+session_id：标识同一个会话
 message_id：标识同一轮用户消息
 call_id：标识这一轮消息内部的一次具体调用
-parent_call_id：可选，标识真实调用树
+parent_call_id：可选扩展，标识真实调用树
 ```
 
 不需要 `turn_id`。
@@ -397,7 +397,7 @@ parent_call_id：可选，标识真实调用树
 
 ```text
 x-remio-session-key / remio_session_key
-= 当前用于判断同一个会话。
+= 当前用于判断同一个会话。虽然现有字段名叫 session_key，但语义上应该理解为 session_id。
 
 x-remio-lifecycle-id / remio_lifecycle_id
 = 当前实际表示一轮用户消息，应该理解为 message_id。

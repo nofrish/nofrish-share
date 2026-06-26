@@ -264,10 +264,10 @@ h1 {
 <p>因此，理想模型就应该是：</p>
 <pre><code class="language-text">Session -> Message -> Call
 </code></pre>
-<p>最多在下一层扩展一个可选的：</p>
+<p>如果未来某一天，一个 <code>Message</code> 内部的 <code>Call</code> 也需要表达层级关系，再在 <code>Call</code> 上增加一个可选的父调用字段：</p>
 <pre><code class="language-text">parent_call_id
 </code></pre>
-<p>用来表达调用树。</p>
+<p>用来表达“某个 call 是由另一个 call 触发的”。它不是新的主层级，也不是第一版必须有的字段。</p>
 <p>但当前系统没有守住这个简单模型，而是引入了 <code>session_key</code>、<code>lifecycle_id</code>、<code>trace_id</code>、<code>span_id</code>、<code>parent_span_id</code> 等一堆字段。问题不只是字段多，而是抽象层级错了。</p>
 <aside class="callout callout-warning" data-callout="warning">
 <p>这不是命名风格问题，而是请求追踪模型没有被认真设计之后造成的复杂性扩散。</p>
@@ -280,7 +280,7 @@ h1 {
 <pre><code class="language-text">这些请求是不是属于同一个会话？
 </code></pre>
 <p>理想字段：</p>
-<pre><code class="language-text">session_key
+<pre><code class="language-text">session_id
 </code></pre>
 <p>这个字段应该只表达会话身份，不应该混入入口、aApp、feature 或 plugin 信息。</p>
 <p>这里需要说明一个产品事实：用户确实可以从某个 aApp 入口进入一个会话。这个会话在产品体验上可以叫 aApp 会话，因为它一开始就带着一组预定义提示词、预定义功能或插件配置。</p>
@@ -441,18 +441,18 @@ trace_id：这一轮用户消息触发的链路
 <p>如果一个字段需要解释半天才知道能不能用，它就不是一个好字段。</p>
 <h2>应该收敛成什么</h2>
 <p>理想字段体系应该是：</p>
-<pre><code class="language-text">session_key
+<pre><code class="language-text">session_id
 message_id
 call_id
 </code></pre>
-<p>如果下一步确实需要调用树，再增加：</p>
+<p>如果未来一个 <code>Message</code> 内部的 <code>Call</code> 需要分层，再增加：</p>
 <pre><code class="language-text">parent_call_id
 </code></pre>
 <p>也就是说：</p>
-<pre><code class="language-text">session_key：标识同一个会话
+<pre><code class="language-text">session_id：标识同一个会话
 message_id：标识同一轮用户消息
 call_id：标识这一轮消息内部的一次具体调用
-parent_call_id：可选，标识真实调用树
+parent_call_id：可选扩展，标识真实调用树
 </code></pre>
 <p>不需要 <code>turn_id</code>。</p>
 <p>不需要 <code>trace_id</code>。</p>
@@ -461,7 +461,7 @@ parent_call_id：可选，标识真实调用树
 <h2>给后端的解释</h2>
 <p>如果后端现在必须接入现有字段，可以先这样理解：</p>
 <pre><code class="language-text">x-remio-session-key / remio_session_key
-= 当前用于判断同一个会话。
+= 当前用于判断同一个会话。虽然现有字段名叫 session_key，但语义上应该理解为 session_id。
 
 x-remio-lifecycle-id / remio_lifecycle_id
 = 当前实际表示一轮用户消息，应该理解为 message_id。
