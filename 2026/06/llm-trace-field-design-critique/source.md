@@ -4,9 +4,9 @@ date: 2026-06-26
 slug: llm-trace-field-design-critique
 ---
 
-> It is easy to look standard.
-> It is hard to be right.
-> We should choose the hard thing.
+> Simple can be harder than complex: You have to work hard to get your thinking clean to make it simple.
+>
+> — Steve Jobs
 
 ## 背景
 
