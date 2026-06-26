@@ -289,7 +289,6 @@ h1 {
 <p><code>Message</code> 表示用户发出的一轮消息。</p>
 <p>它回答的问题是：这些内部调用是不是由同一轮用户消息触发的？</p>
 <p>理想字段：<code>message_id</code>。</p>
-<p><strong>不需要再引入 <code>turn</code> 这个概念。</strong> <code>Message</code> 已经足够表达这一层。多引入一个 <code>turn</code>，只会让原本清楚的三层模型继续变复杂。</p>
 <h3>Call</h3>
 <p><code>Call</code> 表示一轮消息内部的一次具体调用。</p>
 <p>例如：</p>
@@ -430,7 +429,6 @@ aapp:&#x3C;aappId>:session:&#x3C;sessionId>
 <li><code>call_id</code>：标识这一轮消息内部的一次具体调用</li>
 <li><code>parent_call_id</code>：可选扩展，标识真实调用树</li>
 </ul>
-<p><strong>不需要 <code>turn_id</code>。</strong></p>
 <p><strong>不需要 <code>trace_id</code>。</strong></p>
 <p><strong>不应该把 <code>span_id</code> 暴露成主要概念。</strong></p>
 <p>当前的 <code>parent_span_id</code> 也<strong>不能当作可靠的 <code>parent_call_id</code></strong>。</p>
