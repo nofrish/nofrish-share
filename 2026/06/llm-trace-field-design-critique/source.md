@@ -4,6 +4,8 @@ date: 2026-06-26
 slug: llm-trace-field-design-critique
 ---
 
+> 把通用模型照搬进来很容易；难的是承认自己的场景更简单，然后设计一套看起来不够“标准”、但刚好正确的模型。工程设计应该选择后者。
+
 ## 背景
 
 我们现在讨论的是客户端发给后端的一套 LLM 请求标识字段。
@@ -20,12 +22,10 @@ Session：一个用户会话
 
 这已经足够清楚：
 
-```text
-哪些请求属于同一个会话？
-哪些调用属于同一轮消息？
-某一次具体调用是什么？
-如果需要，某个调用是谁触发的？
-```
+- 哪些请求属于同一个会话？
+- 哪些调用属于同一轮消息？
+- 某一次具体调用是什么？
+- 如果需要，某个调用是谁触发的？
 
 因此，理想模型就应该是：
 
@@ -33,13 +33,7 @@ Session：一个用户会话
 Session -> Message -> Call
 ```
 
-如果未来某一天，一个 `Message` 内部的 `Call` 也需要表达层级关系，再在 `Call` 上增加一个可选的父调用字段：
-
-```text
-parent_call_id
-```
-
-用来表达“某个 call 是由另一个 call 触发的”。它不是新的主层级，也不是第一版必须有的字段。
+如果未来某一天，一个 `Message` 内部的 `Call` 也需要表达层级关系，再在 `Call` 上增加一个可选的父调用字段 `parent_call_id`，用来表达“某个 call 是由另一个 call 触发的”。它不是新的主层级，也不是第一版必须有的字段。
 
 但当前系统没有守住这个简单模型，而是引入了 `session_key`、`lifecycle_id`、`trace_id`、`span_id`、`parent_span_id` 等一堆字段。问题不只是字段多，而是抽象层级错了。
 
@@ -54,17 +48,9 @@ parent_call_id
 
 `Session` 表示一个产品会话。
 
-它回答的问题是：
+它回答的问题是：这些请求是不是属于同一个会话？
 
-```text
-这些请求是不是属于同一个会话？
-```
-
-理想字段：
-
-```text
-session_id
-```
+理想字段：`session_id`。
 
 这个字段应该只表达会话身份，不应该混入入口、aApp、feature 或 plugin 信息。
 
@@ -80,17 +66,9 @@ aApp 可以影响会话初始状态，但不应该改变底层会话身份。
 
 `Message` 表示用户发出的一轮消息。
 
-它回答的问题是：
+它回答的问题是：这些内部调用是不是由同一轮用户消息触发的？
 
-```text
-这些内部调用是不是由同一轮用户消息触发的？
-```
-
-理想字段：
-
-```text
-message_id
-```
+理想字段：`message_id`。
 
 不需要再引入 `turn` 这个概念。`Message` 已经足够表达这一层。多引入一个 `turn`，只会让原本清楚的三层模型继续变复杂。
 
@@ -100,39 +78,25 @@ message_id
 
 例如：
 
-```text
-主 Agent LLM 调用
-RAG answer 调用
-工具参数生成调用
-aApp action feedback 调用
-memory flush 调用
-```
+- 主 Agent LLM 调用
+- RAG answer 调用
+- 工具参数生成调用
+- aApp action feedback 调用
+- memory flush 调用
 
-理想字段：
+理想字段：`call_id`。
 
-```text
-call_id
-```
-
-如果确实需要表达调用树，再增加：
-
-```text
-parent_call_id
-```
-
-注意，`parent_call_id` 是下一步扩展，不是第一版必须有的东西。只有当我们真的需要回答“这个调用是谁触发的”时，它才有价值。
+如果确实需要表达调用树，再增加 `parent_call_id`。这是下一步扩展，不是第一版必须有的东西。只有当我们真的需要回答“这个调用是谁触发的”时，它才有价值。
 
 ## 当前模型
 
 当前系统实际暴露的是：
 
-```text
-session_key
-lifecycle_id
-trace_id
-span_id
-parent_span_id
-```
+- `session_key`
+- `lifecycle_id`
+- `trace_id`
+- `span_id`
+- `parent_span_id`
 
 这套字段看起来很专业，但实际非常混乱。它把一个本来只有三层的请求关系，包装成了 tracing 术语集合。
 
@@ -171,11 +135,9 @@ aApp 可以是产品入口，也可以是一组预置提示词、预置能力或
 
 aApp 信息应该放在：
 
-```text
-feature
-surface
-entities.aappId
-```
+- `feature`
+- `surface`
+- `entities.aappId`
 
 而不是放进 `session_key` 的一级结构里。
 
@@ -185,17 +147,7 @@ entities.aappId
 
 当前主 Chat 链路里，`lifecycle_id` 基本对应一轮用户消息的 `messageRequestID`。
 
-那它就应该叫：
-
-```text
-message_id
-```
-
-而不是：
-
-```text
-lifecycle_id
-```
+那它就应该叫 `message_id`，而不是 `lifecycle_id`。
 
 `lifecycle` 是一个过大的词。它可能让人以为这是 App 生命周期、Agent 生命周期、会话生命周期、任务生命周期，或者某个更大的运行周期。
 
@@ -209,13 +161,7 @@ lifecycle_id
 
 但在我们的场景里，一轮用户消息天然就是一条完整的内部调用链。
 
-如果要标识这条链，直接使用：
-
-```text
-message_id
-```
-
-就够了。
+如果要标识这条链，直接使用 `message_id` 就够了。
 
 `trace_id` 试图再引入一个“链路层”，但这个层没有表达任何新的请求关系，也没有提供比 `message_id` 更清楚的分组边界。
 
@@ -223,10 +169,8 @@ message_id
 
 它让同一件事出现两个名字：
 
-```text
-message_id：这一轮用户消息
-trace_id：这一轮用户消息触发的链路
-```
+- `message_id`：这一轮用户消息
+- `trace_id`：这一轮用户消息触发的链路
 
 在我们的请求追踪标准里，这两个边界是同一个边界。保留两个名字，只会制造混乱。
 
@@ -234,13 +178,7 @@ trace_id：这一轮用户消息触发的链路
 
 `span_id` 也是 tracing 术语。
 
-但在我们的场景里，它实际表达的是：
-
-```text
-call_id
-```
-
-也就是一轮消息内部的一次具体调用。
+但在我们的场景里，它实际表达的是 `call_id`，也就是一轮消息内部的一次具体调用。
 
 如果它就是 call，就应该叫 call。让后端先理解 span，再把 span 映射成 call，是没有必要的心智负担。
 
@@ -330,29 +268,10 @@ Session
 
 但现在这些字段做不到：
 
-```text
-lifecycle_id
-```
-
-看不出它到底是哪种 lifecycle。
-
-```text
-trace_id
-```
-
-看不出它对应 session、message，还是某次调用链。
-
-```text
-span_id
-```
-
-对当前后端来说不自然。真正需要的是 call。
-
-```text
-parent_span_id
-```
-
-暗示有调用树，但当前实现并没有真实调用树。
+- `lifecycle_id`：看不出它到底是哪种 lifecycle。
+- `trace_id`：看不出它对应 session、message，还是某次调用链。
+- `span_id`：对当前后端来说不自然。真正需要的是 call。
+- `parent_span_id`：暗示有调用树，但当前实现并没有真实调用树。
 
 这些名字不是中性的。它们会误导接入方以为系统里存在更多层级。
 
@@ -362,26 +281,18 @@ parent_span_id
 
 理想字段体系应该是：
 
-```text
-session_id
-message_id
-call_id
-```
+- `session_id`
+- `message_id`
+- `call_id`
 
-如果未来一个 `Message` 内部的 `Call` 需要分层，再增加：
-
-```text
-parent_call_id
-```
+如果未来一个 `Message` 内部的 `Call` 需要分层，再增加 `parent_call_id`。
 
 也就是说：
 
-```text
-session_id：标识同一个会话
-message_id：标识同一轮用户消息
-call_id：标识这一轮消息内部的一次具体调用
-parent_call_id：可选扩展，标识真实调用树
-```
+- `session_id`：标识同一个会话
+- `message_id`：标识同一轮用户消息
+- `call_id`：标识这一轮消息内部的一次具体调用
+- `parent_call_id`：可选扩展，标识真实调用树
 
 不需要 `turn_id`。
 
@@ -395,22 +306,11 @@ parent_call_id：可选扩展，标识真实调用树
 
 如果后端现在必须接入现有字段，可以先这样理解：
 
-```text
-x-remio-session-key / remio_session_key
-= 当前用于判断同一个会话。虽然现有字段名叫 session_key，但语义上应该理解为 session_id。
-
-x-remio-lifecycle-id / remio_lifecycle_id
-= 当前实际表示一轮用户消息，应该理解为 message_id。
-
-x-remio-span-id / remio_span_id
-= 当前实际表示一次具体调用，应该理解为 call_id。
-
-x-remio-parent-span-id / remio_parent_span_id
-= 名义上表示父调用，但当前多数只是挂到虚拟 root span 上，不能可靠表达真实调用树。
-
-x-remio-trace-id / remio_trace_id
-= 当前场景下没有独立必要性。它和 message_id 表达的是同一轮用户消息边界。
-```
+- `x-remio-session-key` / `remio_session_key`：当前用于判断同一个会话。虽然现有字段名叫 `session_key`，但语义上应该理解为 `session_id`。
+- `x-remio-lifecycle-id` / `remio_lifecycle_id`：当前实际表示一轮用户消息，应该理解为 `message_id`。
+- `x-remio-span-id` / `remio_span_id`：当前实际表示一次具体调用，应该理解为 `call_id`。
+- `x-remio-parent-span-id` / `remio_parent_span_id`：名义上表示父调用，但当前多数只是挂到虚拟 root span 上，不能可靠表达真实调用树。
+- `x-remio-trace-id` / `remio_trace_id`：当前场景下没有独立必要性。它和 `message_id` 表达的是同一轮用户消息边界。
 
 这只是兼容解释，不是理想设计。
 
@@ -436,12 +336,6 @@ Session -> Lifecycle -> Trace -> Span
 
 好的工程设计不是把所有看起来专业的字段都加上去。好的工程设计是先判断系统到底需要表达什么，然后用最少、最稳定、最贴近当前场景的概念表达它。
 
-在这里，答案很简单：
-
-```text
-Session
-Message
-Call
-```
+在这里，答案很简单：`Session`、`Message`、`Call`。
 
 其他没有真实必要性的层级，都应该收掉。
