@@ -250,7 +250,7 @@ h1 {
         <h2>背景</h2>
 <p>我们现在讨论的是一套 LLM 请求标识字段。</p>
 <p>产品场景并不复杂：用户新建一个会话，在会话里连续发多轮消息。每一轮消息可能触发 Agent 内部多次调用，例如主模型调用、RAG、工具调用、aApp 调用、结果总结、记忆压缩等。</p>
-<p>这件事从业务视角看，是一个非常清楚的三层结构：</p>
+<p>这件事从请求关系看，是一个非常清楚的三层结构：</p>
 <pre><code class="language-text">Session：一个用户会话
   Message / Turn：用户发出的一轮消息
     Call：这一轮消息内部触发的一次具体调用
@@ -263,10 +263,10 @@ h1 {
 </code></pre>
 <p>但当前系统引入了 <code>session_key</code>、<code>lifecycle_id</code>、<code>trace_id</code>、<code>span_id</code>、<code>parent_span_id</code> 等一组字段。问题不只是“字段多”，而是这些字段背后的抽象层级没有被认真建模。</p>
 <aside class="callout callout-warning" data-callout="warning">
-<p>这不是命名风格问题，而是业务模型和观测模型混在一起之后造成的抽象污染。</p>
+<p>这不是命名风格问题，而是请求追踪模型没有被认真设计之后造成的抽象污染。</p>
 </aside>
 <h2>理想情况下应该怎么表达</h2>
-<p>一个合理的设计，应该先从业务对象出发。</p>
+<p>一个合理的设计，应该先从产品对象和请求关系出发。</p>
 <h3>1. Session</h3>
 <p><code>Session</code> 表示一个产品会话。</p>
 <p>它的职责只有一个：标记多轮用户消息属于同一个会话。</p>
@@ -276,7 +276,10 @@ session_key
 </code></pre>
 <p>这个字段不应该携带功能入口信息，也不应该因为用户从 Chat 进入、从 aApp 进入、或在 Chat 中调起 aApp 而改变。</p>
 <p>会话就是会话。</p>
-<p>如果同一个 Chat 会话里调起了多个 aApp，这些 aApp 是能力、工具或上下文，不是新的会话边界。</p>
+<p>这里需要承认一个产品事实：用户确实可以从某个 aApp 入口进入一个会话。这个会话在产品体验上可以被称为 aApp 会话，因为它一开始就带着一组预定义提示词、预定义能力或插件配置。</p>
+<p>但从底层模型看，它仍然是一个 Chat 会话，只是这个会话被注入了某个 aApp、某组 plugin，或某组能力约束。</p>
+<p>同样，一个普通 Chat 会话里也可以临时调用一个或多个 aApp。也就是说，普通会话和所谓 aApp 会话的边界并不是硬边界，而是一种初始上下文和能力配置的差异。</p>
+<p>所以 aApp 可以影响会话的初始状态，但不应该改变底层会话身份。</p>
 <h3>2. Message / Turn</h3>
 <p><code>Message</code> 或 <code>Turn</code> 表示用户发出的一轮消息。</p>
 <p>一轮用户消息可能触发很多内部调用，但这些调用都属于同一个用户意图。</p>
@@ -310,7 +313,7 @@ trace_id
 span_id
 parent_span_id
 </code></pre>
-<p>表面上看，每个字段都好像有来源、有概念、有工程味道。但放到我们的业务场景里看，问题非常明显。</p>
+<p>表面上看，每个字段都好像有来源、有概念、有工程味道。但放到我们的实际场景里看，问题非常明显。</p>
 <h3><code>session_key</code></h3>
 <p>它应该表示会话。</p>
 <p>但当前某些路径会把它拼成：</p>
@@ -319,13 +322,17 @@ aapp:&#x3C;aappId>:session:&#x3C;sessionId>
 </code></pre>
 <p>这等于把“会话身份”和“功能入口 / aApp 身份”混在了一起。</p>
 <p>这是一个典型的建模错误。</p>
-<p>因为 aApp 不是会话边界。aApp 应该出现在：</p>
+<p>更准确地说，aApp 可以是产品上的会话入口，也可以是一组预置提示词、预置能力或插件配置。但它不应该成为底层 session identity 的一级命名空间。</p>
+<p>从 aApp 进入的会话，本质上是“带着某个 aApp 上下文启动的 Chat 会话”。从普通 Chat 进入的会话，也可以在过程中调用一个或多个 aApp。</p>
+<p>因此，aApp 和 Chat 不是两个互斥的底层会话类型。它们之间的边界是模糊的：一个是会话入口或初始能力包，另一个是通用对话容器。</p>
+<p>aApp 信息应该出现在：</p>
 <pre><code class="language-text">feature
 surface
 entities.aappId
 </code></pre>
-<p>而不是被塞进 <code>session_key</code>。</p>
-<p>如果同一个会话里调用多个 aApp，却因为 <code>session_key</code> 不同而被拆成多个“会话”，那么这个字段就没有忠实表达业务现实。</p>
+<p>而不是被塞进 <code>session_key</code> 的一级命名结构里。</p>
+<p>如果同一个底层会话因为入口不同或调用了不同 aApp，就被拆成 <code>chat:&#x3C;sessionId></code> 和 <code>aapp:&#x3C;aappId>:session:&#x3C;sessionId></code> 这样的不同 session key，那么这个字段就没有忠实表达业务现实。</p>
+<p>它表达的不是“同一个会话”，而是“同一个会话 + 某个入口或某个 aApp 维度”。这会让 session identity 变得不纯粹，也会让后端在聚合、排障、统计时被迫理解一个并不稳定的产品边界。</p>
 <h3><code>lifecycle_id</code></h3>
 <p>这个字段最让人困惑。</p>
 <p>从当前主 Chat 链路看，它基本对应一轮用户消息的 <code>messageRequestID</code>。</p>
@@ -341,15 +348,25 @@ turn_id
 <pre><code class="language-text">一轮用户消息触发的内部调用链路
 </code></pre>
 <p>这就和 <code>lifecycle_id</code> 的含义高度重叠。</p>
-<p>如果 <code>lifecycle_id</code> 已经代表一轮用户消息，那么 <code>trace_id</code> 作为业务字段就没有必要再出现。它可以作为观测字段存在，但不应该进入业务判断。</p>
+<p>在我们这套场景里，<code>trace_id</code> 没有独立意义。</p>
+<p>原因很简单：我们的请求追踪结构已经是：</p>
+<pre><code class="language-text">Session -> Message / Turn -> Call
+</code></pre>
+<p>一轮用户消息天然就是一条完整的内部调用链。如果需要标识这条链，应该直接使用 <code>message_request_id / turn_id</code>。</p>
+<p><code>trace_id</code> 试图再引入一个“链路层”，但这个链路层并没有表达任何新的请求关系，也没有提供比 <code>turn_id</code> 更清楚的分组边界。</p>
+<p>所以它不是“可有可无”，而是一个重复层级。它让同一件事出现两个名字：</p>
+<pre><code class="language-text">lifecycle_id / turn_id：这一轮用户消息
+trace_id：这一轮用户消息触发的链路
+</code></pre>
+<p>这在我们的场景里没有必要。</p>
 <h3><code>span_id</code></h3>
 <p><code>span_id</code> 也是 tracing 术语。</p>
-<p>在我们的业务里，它其实就是：</p>
+<p>在我们的场景里，它其实就是：</p>
 <pre><code class="language-text">call_id
 </code></pre>
 <p>它表示一轮消息内部的某一次具体调用。</p>
 <p>这个字段本身有价值，但问题在于命名把简单概念复杂化了。</p>
-<p>业务后端需要理解的是“这是哪一次调用”，不是先学习 OpenTelemetry 式的 span 概念。</p>
+<p>后端需要理解的是“这是哪一次调用”，不是先学习 OpenTelemetry 式的 span 概念。</p>
 <h3><code>parent_span_id</code></h3>
 <p>这个字段只有在需要调用树时才有价值。</p>
 <p>例如：</p>
@@ -360,10 +377,37 @@ turn_id
 </code></pre>
 <p>如果我们要知道某个失败调用是被谁触发的，或者要分析哪条调用链耗时最长，<code>parent_span_id</code> 有用。</p>
 <p>但如果后端只需要做会话归属、消息归属和调用记录，它不是必需字段。</p>
-<p>把可选的调用树能力和核心业务标识混在一起，会让接入方误以为每个字段都是必需的业务字段。</p>
+<p>把可选的调用树能力和核心请求标识混在一起，会让接入方误以为每个字段都是必需的协议字段。</p>
+<p>更严重的是，当前代码里 <code>parent_span_id</code> 其实也没有真正建立这样的调用树。</p>
+<p>现在的实现大致是：先创建一个 <code>rootTrace</code>，然后很多真实 LLM call 都通过 <code>createChildLlmTrace(rootTrace, ...)</code> 生成。这个函数会机械地把：</p>
+<pre><code class="language-text">parent_span_id = rootTrace.spanId
+</code></pre>
+<p>也就是说，很多调用都会挂到同一个 root span 下面。</p>
+<p>但这个 root span 通常不是一次真实发给后端的 LLM call。它更像客户端内存里的一个虚拟根节点。</p>
+<p>于是后端如果拿这些字段重建调用树，看到的很可能是：</p>
+<pre><code class="language-text">Virtual root R
+  main agent call A
+  rag call B
+  tool call C
+  memory flush call D
+</code></pre>
+<p>问题是 <code>Virtual root R</code> 本身并不是一条真实调用记录。</p>
+<p>更重要的是，这个结构并没有表达真实的触发关系。比如如果主 Agent call 触发了 RAG，真正有意义的关系应该是：</p>
+<pre><code class="language-text">main agent call A
+  rag call B
+</code></pre>
+<p>但现在实际更像是：</p>
+<pre><code class="language-text">Virtual root R
+  main agent call A
+  rag call B
+</code></pre>
+<p>这并不能说明 <code>rag call B</code> 是由 <code>main agent call A</code> 触发的，只能说明它们都属于同一个虚拟 root。</p>
+<p>而“它们属于同一轮用户消息”这件事，本来 <code>message_request_id / turn_id</code> 就已经能表达。</p>
+<p>所以当前的 <code>parent_span_id</code> 看起来像是在表达调用树，实际上并没有表达真实调用树。它只是把多个 call 挂到一个通常不存在于后端调用记录里的虚拟父节点上。</p>
+<p>这不是 <code>parent_call_id</code>。这只是一个名义上的 parent。</p>
 <h2>字段命名本身非常误导</h2>
 <p>当前字段最严重的问题之一，是命名没有让语义变清楚，反而让语义变模糊。</p>
-<p>一个好的字段名应该让接入方不用翻代码、不用问人，也能大致猜到它的业务含义。</p>
+<p>一个好的字段名应该让接入方不用翻代码、不用问人，也能大致猜到它的协议含义。</p>
 <p>但现在这些名字并没有做到这一点。</p>
 <pre><code class="language-text">lifecycle_id
 </code></pre>
@@ -375,14 +419,14 @@ turn_id
 <p>看起来像一整条链路，但这条链路到底对应一个 session、一个 message，还是一次 LLM call？接入方无法从名字判断。</p>
 <pre><code class="language-text">span_id
 </code></pre>
-<p>对熟悉 tracing 的人来说，这是一个 span。对业务后端来说，它并不自然。业务后端真正关心的是“这是哪一次 call”。如果它就是 call，就应该明确叫 call。</p>
+<p>对熟悉 tracing 的人来说，这是一个 span。对我们的后端来说，它并不自然。后端真正关心的是“这是哪一次 call”。如果它就是 call，就应该明确叫 call。</p>
 <pre><code class="language-text">parent_span_id
 </code></pre>
-<p>它暗示系统中存在一棵 tracing span 树，但并没有先说明这棵树和业务里的 Session、Message、Call 是什么映射关系。</p>
+<p>它暗示系统中存在一棵 tracing span 树，但并没有先说明这棵树和我们实际需要的 Session、Message、Call 是什么映射关系。</p>
 <p>所以问题不是“字段名不够漂亮”，而是字段名没有承担沟通责任。</p>
-<p>它们把理解成本转嫁给接入方：接入方必须先学习这套自定义解释，才知道哪些字段能用于业务判断，哪些只是观测辅助。</p>
+<p>它们把理解成本转嫁给接入方：接入方必须先学习这套自定义解释，才知道哪些字段才是真正的请求追踪主键，哪些只是重复或派生概念。</p>
 <aside class="callout callout-key" data-callout="key">
-<p>如果一个字段需要长篇解释才能知道该不该用于业务逻辑，它就不是一个好字段。</p>
+<p>如果一个字段需要长篇解释才能知道该不该用于请求追踪逻辑，它就不是一个好字段。</p>
 </aside>
 <h2>这是对通用方案的生搬硬套</h2>
 <p>另一个明显问题是：当前设计像是把业界通用的 tracing 模型直接搬了过来，却没有先判断我们的业务场景到底需不需要这些层级。</p>
@@ -392,7 +436,7 @@ turn_id
     Child Span
 </code></pre>
 <p>这套模型适合做分布式链路追踪，例如跨服务、跨进程、跨组件排查耗时和错误。</p>
-<p>但我们的核心业务问题不是“如何完整复刻一套 tracing 模型”，而是：</p>
+<p>但我们的核心问题不是“如何完整复刻一套 tracing 模型”，而是：</p>
 <pre><code class="language-text">一个用户会话里有哪些消息？
 一轮消息里有哪些内部调用？
 这些调用是否需要父子关系？
@@ -402,29 +446,31 @@ turn_id
   Message / Turn
     Call
 </code></pre>
-<p>如果确实需要观测系统，可以在业务模型之上补充 tracing 字段。但不能反过来，让 tracing 模型主导业务协议。</p>
-<p>当前设计的问题就在这里：它没有从业务场景出发做裁剪，而是把一套通用概念打包搬进来。</p>
+<p>但我们这里不是在设计一套通用分布式 tracing 平台，而是在为当前 LLM 请求定义一套请求追踪标准。</p>
+<p>这套标准不需要再区分所谓“业务字段”和“工程字段”。对接入方来说，协议里出现的字段就应该有清楚、唯一、稳定的含义。</p>
+<p>如果一个字段不能落到 <code>Session -> Message / Turn -> Call</code> 里的某一层，它就不应该进入这套请求追踪标准。</p>
+<p>当前设计的问题就在这里：它没有从当前场景出发做裁剪，而是把一套通用概念打包搬进来。</p>
 <p>这会造成几个直接后果：</p>
-<pre><code class="language-text">业务上不需要的概念进入协议
+<pre><code class="language-text">当前场景不需要的概念进入协议
 接入方不知道哪些字段重要
 同一层级出现多个近似字段
 字段含义需要额外口头解释
 后续清理成本变高
 </code></pre>
-<p>通用方案不是不能用，但必须经过业务语义裁剪。</p>
+<p>通用方案不是不能用，但必须经过场景裁剪。</p>
 <p>没有裁剪的通用方案，不是架构能力，而是复杂性搬运。</p>
 <h2>关键问题不是“字段多”，而是“层级乱”</h2>
 <p>当前设计看起来像这样：</p>
 <pre><code class="language-text">Session -> Lifecycle -> Trace -> Span
 </code></pre>
-<p>但业务真实结构是：</p>
+<p>但我们真实需要的请求追踪结构是：</p>
 <pre><code class="language-text">Session -> Message / Turn -> Call
 </code></pre>
 <p>这就是问题的核心。</p>
-<p>系统里不是天然存在一个独立的 <code>Lifecycle</code> 层，也不是每个后端逻辑都需要理解 <code>Trace</code> 和 <code>Span</code>。</p>
-<p><code>Trace / Span</code> 是观测系统的语言。</p>
-<p><code>Session / Message / Call</code> 才是业务系统的语言。</p>
-<p>当前设计把观测语言提前暴露给业务接口，导致业务后端不得不理解一堆并不服务于业务判断的概念。</p>
+<p>系统里不是天然存在一个独立的 <code>Lifecycle</code> 层，也不天然存在一个独立于 Message / Turn 的 <code>Trace</code> 层。</p>
+<p><code>Trace</code> 在这里没有独立层级。它和一轮 Message / Turn 表达的是同一个边界。</p>
+<p><code>Span</code> 至少还能勉强映射成 <code>Call</code>。但 <code>Trace</code> 在当前结构里没有对应的新对象。</p>
+<p>当前设计把通用 tracing 术语提前暴露到请求协议里，导致后端不得不理解一堆没有独立层级价值的概念。</p>
 <h2>这类问题为什么危险</h2>
 <p>这类字段设计看起来只是“多加了几个 header”，实际上会制造长期成本。</p>
 <h3>1. 接入方不知道该信哪个字段</h3>
@@ -443,9 +489,9 @@ parent span 我是不是必须处理？
 </code></pre>
 <p>这些问题本来不应该存在。</p>
 <p>好的接口设计应该让接入方一眼知道字段职责。</p>
-<h3>2. 业务模型被 tracing 模型反向绑架</h3>
-<p>Tracing 是为排障服务的，不是为定义业务对象服务的。</p>
-<p>如果业务后端需要先理解 trace/span 才能判断一组请求的关系，说明接口抽象已经偏离业务了。</p>
+<h3>2. 请求追踪模型被 tracing 模型反向绑架</h3>
+<p>Tracing 是一套通用模型，不是当前场景的天然标准答案。</p>
+<p>如果后端需要先理解 trace/span/lifecycle 的自定义映射，才能判断一组请求之间的关系，说明接口抽象已经偏离当前场景了。</p>
 <h3>3. 字段一旦进入协议，就很难删除</h3>
 <p>header 和 body 字段一旦发给后端，就会被日志、统计、路由、监控、排障系统依赖。</p>
 <p>早期随手加的字段，后面会变成协议债务。</p>
@@ -454,17 +500,17 @@ parent span 我是不是必须处理？
 <p>这类设计很像“看到 tracing 概念就全塞进去”的结果：trace、span、parent span、lifecycle、session，看起来都专业，但没有先问一个最基本的问题：</p>
 <pre><code class="language-text">我们的业务场景到底需要表达几层关系？
 </code></pre>
-<p>AI 很擅长生成一套看起来完整的工程术语，但它不会自动保证这些术语适合当前业务。</p>
+<p>AI 很擅长生成一套看起来完整的工程术语，但它不会自动保证这些术语适合当前场景。</p>
 <p>工程师的职责不是把 AI 生成的概念照单全收，而是判断：</p>
 <pre><code class="language-text">这个抽象是否必要？
 这个字段是否有唯一职责？
-它是否符合我们的业务边界？
+它是否符合我们的场景边界？
 未来接入方能不能理解？
 </code></pre>
 <p>如果这些问题没有回答清楚，就把字段发进协议里，本质上是在把未经审查的复杂性扩散给后端和未来维护者。</p>
 <h2>更合理的字段体系</h2>
-<p>我们应该把字段重新映射到业务三层结构。</p>
-<h3>核心业务字段</h3>
+<p>我们应该把字段重新映射到请求三层结构。</p>
+<h3>核心请求字段</h3>
 <pre><code class="language-text">session_key
 </code></pre>
 <p>表示同一个产品会话。</p>
@@ -477,17 +523,15 @@ parent span 我是不是必须处理？
 <pre><code class="language-text">parent_call_id
 </code></pre>
 <p>可选。只有需要调用树、耗时链路、错误传播路径时使用。</p>
-<h3>观测字段</h3>
+<h3>不应该保留的重复层级</h3>
 <pre><code class="language-text">trace_id
-span_id
-parent_span_id
 </code></pre>
-<p>可以保留给日志和 tracing 系统，但不要让业务后端必须依赖它们理解会话和消息。</p>
-<p>如果保留，也应该明确文档化：</p>
-<pre><code class="language-text">trace_id 只用于 observability
-span_id 可映射为 call_id
-parent_span_id 可映射为 parent_call_id
+<p>在当前场景里没有独立层级。它和 <code>message_request_id / turn_id</code> 表达的是同一个边界：一轮用户消息触发的一组内部调用。</p>
+<p>如果已经有 <code>message_request_id / turn_id</code>，再引入 <code>trace_id</code> 只会制造两个名字表达同一件事。</p>
+<pre><code class="language-text">parent_span_id
 </code></pre>
+<p>理论上可以对应 <code>parent_call_id</code>，但当前实现没有做到这一点。它多数时候只是指向一个虚拟 root span，而不是指向真实触发当前调用的上游 call。</p>
+<p>所以在当前实现下，它也不应该被当成可靠的调用树字段。</p>
 <h2>当前字段应该怎么解释给后端</h2>
 <p>如果后端现在要接入，建议这样解释：</p>
 <pre><code class="language-text">x-remio-session-key / remio_session_key
@@ -500,31 +544,31 @@ x-remio-span-id / remio_span_id
 = 当前表示一次具体内部调用，等价理解为 call_id。
 
 x-remio-parent-span-id / remio_parent_span_id
-= 当前表示父调用，只有需要调用树时才处理。
+= 名义上表示父调用，但当前实现多数只是挂到虚拟 root span 上，不能可靠表达真实调用树。
 
 x-remio-trace-id / remio_trace_id
-= 观测字段，用于日志聚合和排障，不建议作为业务归属判断依据。
+= 当前场景下没有独立必要性。它和 message_request_id / turn_id 表达的是同一轮用户消息边界。
 </code></pre>
 <h2>结论</h2>
-<p>这套设计最大的问题，不是字段数量，而是没有守住业务抽象。</p>
-<p>业务上只有三层：</p>
+<p>这套设计最大的问题，不是字段数量，而是没有守住请求关系抽象。</p>
+<p>当前请求关系只有三层：</p>
 <pre><code class="language-text">Session -> Message / Turn -> Call
 </code></pre>
 <p>当前却暴露成了：</p>
 <pre><code class="language-text">Session -> Lifecycle -> Trace -> Span
 </code></pre>
 <p>这让一个本来清晰的会话模型变成了一套需要解释半天的 tracing 术语集合。</p>
-<p>更严重的是，这些字段名本身并不自解释。它们看起来专业，但对当前业务接入方来说并不清楚，甚至具有误导性。</p>
+<p>更严重的是，这些字段名本身并不自解释。它们看起来专业，但对当前接入方来说并不清楚，甚至具有误导性。</p>
 <p>这不是好的工程抽象。</p>
-<p>好的工程设计不是把所有看起来专业的字段都加上去，也不是把业界通用方案不加判断地搬进来。好的工程设计是先判断系统真实需要表达什么，再选择最少、最稳定、最贴近业务的概念。</p>
+<p>好的工程设计不是把所有看起来专业的字段都加上去，也不是把业界通用方案不加判断地搬进来。好的工程设计是先判断系统真实需要表达什么，再选择最少、最稳定、最贴近当前场景的概念。</p>
 <p>在这个场景里，最合理的表达应该是：</p>
 <pre><code class="language-text">session_key：会话
 message_request_id / turn_id：一轮用户消息
 call_id：一次内部调用
 parent_call_id：可选调用树关系
 </code></pre>
-<p>其他字段可以作为观测辅助，但不应该成为业务协议的核心。</p>
-<p>如果一个字段名本身让人误解，如果一个字段需要长篇解释接入方才知道怎么用，如果一套字段只是把通用 tracing 概念生搬硬套到业务协议里，那么它就不是在降低系统复杂度，而是在制造系统复杂度。</p>
+<p><code>trace_id</code> 在这里没有独立必要性。<code>parent_span_id</code> 当前也没有真实调用树意义。它们不是“高级但可选”的字段，而是没有被当前场景和当前实现证明必要的字段。</p>
+<p>如果一个字段名本身让人误解，如果一个字段需要长篇解释接入方才知道怎么用，如果一套字段只是把通用 tracing 概念生搬硬套到当前请求协议里，那么它就不是在降低系统复杂度，而是在制造系统复杂度。</p>
       </div>
     </article>
     <footer class="page-footer">
